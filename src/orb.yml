@@ -1,0 +1,1439 @@
+version: 2.1
+description: |
+    Orb for working with Android projects on CircleCI.
+    Supports running Android emulator UI tests.
+display:
+    source_url: https://github.com/circleci-public/android-orb
+commands:
+    accept_licenses:
+        description: |
+            Accept all Android SDK Manager licenses
+        steps:
+            - run:
+                command: |
+                    yes | sdkmanager --licenses
+                    yes | sdkmanager --update
+                description: |
+                    Accepts all Android SDK licenses. This command is typically not necessary to execute, since the CircleCI machine/convenience images ship with all licenses accepted. This command will add approximately 10 seconds to the build time.
+                name: Accept Android Licenses
+                shell: /bin/bash -e
+    change_java_version:
+        description: |
+            Change default java version from OpenJDK v17.
+        parameters:
+            distribution:
+                default: openjdk
+                description: |
+                    The distribution of JDK to change to
+                enum:
+                    - openjdk
+                    - corretto
+                    - temurin
+                    - zulu
+                type: enum
+            java_version:
+                default: 8
+                description: |
+                    The version of JDK to change to
+                type: integer
+        steps:
+            - run:
+                command: "#!/bin/bash\nCURRENT_DISTRIBUTION=\"$(java -version 2>&1 | tr '[:upper:]' '[:lower:]' | grep -Eo 'corretto|temurin|zulu' | head -n1 || echo \"openjdk\")\"\nCURRENT_JAVA_VER=\"$(java -version 2>&1 | head -1 | cut -d'\"' -f2 | sed '/^1\\./s///' | cut -d'.' -f1)\"\nCURRENT_JAVAC_VER=\"$(javac -version 2>&1 | head -1 | cut -f 2- -d ' ' | sed '/^1\\./s///' | cut -d'.' -f1)\"\necho \"Current Java Distribution: $CURRENT_DISTRIBUTION\"\necho \"Current Java Version: $CURRENT_JAVA_VER\"\necho \"Current Java Compiler Version : $CURRENT_JAVAC_VER\"\nif [ \"$CURRENT_JAVA_VER\" -ne \"${PARAM_JAVA_VER}\" ] || [ \"$CURRENT_DISTRIBUTION\" != \"${PARAM_DISTRIBUTION}\" ]; then\n  if [ \"${PARAM_DISTRIBUTION}\" = \"openjdk\" ]; then\n    if [ \"${PARAM_JAVA_VER}\" -eq 8 ] || [ \"${PARAM_JAVA_VER}\" -eq 17 ]; then\n      if [ \"${PARAM_JAVA_VER}\" -eq 8 ]; then\n        sudo update-alternatives --set java /usr/lib/jvm/java-8-openjdk-amd64/jre/bin/java\n      else\n        sudo update-alternatives --set java /usr/lib/jvm/java-17-openjdk-amd64/bin/java\n      fi\n      sudo update-alternatives --set javac /usr/lib/jvm/java-\"${PARAM_JAVA_VER}\"-openjdk-amd64/bin/javac\n    else\n      sudo apt-get update\n      sudo apt install openjdk-\"${PARAM_JAVA_VER}\"-jdk\n      sudo update-alternatives --set javac /usr/lib/jvm/java-\"${PARAM_JAVA_VER}\"-openjdk-amd64/bin/javac\n      sudo update-alternatives --set java /usr/lib/jvm/java-\"${PARAM_JAVA_VER}\"-openjdk-amd64/bin/java\n    fi\n    echo \"export JAVA_HOME=/usr/lib/jvm/java-${PARAM_JAVA_VER}-openjdk-amd64\" >> \"$BASH_ENV\"\n  else \n    case \"${PARAM_DISTRIBUTION}\" in\n      \"corretto\")\n        sudo apt update\n        sudo apt install wget gnupg\n        wget -O- https://apt.corretto.aws/corretto.key | sudo apt-key add -\n        sudo add-apt-repository -y 'deb https://apt.corretto.aws stable main'\n        sudo apt update\n        if [ \"${PARAM_JAVA_VER}\" -eq 8 ]; then\n          sudo apt install -y java-1.8.0-amazon-corretto-jdk\n          sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-1.8.0-amazon-corretto/bin/java 1\n          sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-1.8.0-amazon-corretto/bin/javac 1\n          sudo update-alternatives --set javac /usr/lib/jvm/java-1.8.0-amazon-corretto/bin/javac\n          sudo update-alternatives --set java /usr/lib/jvm/java-1.8.0-amazon-corretto/bin/java\n          echo \"export JAVA_HOME=/usr/lib/jvm/java-1.8.0-amazon-corretto\" >> \"$BASH_ENV\"\n        else\n          sudo apt install -y java-\"${PARAM_JAVA_VER}\"-amazon-corretto-jdk\n          sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/java-\"${PARAM_JAVA_VER}\"-amazon-corretto/bin/java 1\n          sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/java-\"${PARAM_JAVA_VER}\"-amazon-corretto/bin/javac 1\n          sudo update-alternatives --set javac /usr/lib/jvm/java-\"${PARAM_JAVA_VER}\"-amazon-corretto/bin/javac\n          sudo update-alternatives --set java /usr/lib/jvm/java-\"${PARAM_JAVA_VER}\"-amazon-corretto/bin/java\n          echo \"export JAVA_HOME=/usr/lib/jvm/java-${PARAM_JAVA_VER}-amazon-corretto\" >> \"$BASH_ENV\"\n        fi\n        ;;\n      \"temurin\")\n        sudo apt update\n        sudo apt install wget apt-transport-https gpg\n        wget -O - https://packages.adoptium.net/artifactory/api/gpg/key/public | sudo gpg --dearmor -o /usr/share/keyrings/adoptium.gpg\n        echo \"deb [signed-by=/usr/share/keyrings/adoptium.gpg] https://packages.adoptium.net/artifactory/deb $(lsb_release -cs) main\" | sudo tee /etc/apt/sources.list.d/adoptium.list\n        sudo apt update\n        sudo apt install temurin-\"${PARAM_JAVA_VER}\"-jdk\n        sudo update-alternatives --set javac /usr/lib/jvm/temurin-\"${PARAM_JAVA_VER}\"-jdk-amd64/bin/javac\n        sudo update-alternatives --set java /usr/lib/jvm/temurin-\"${PARAM_JAVA_VER}\"-jdk-amd64/bin/java\n        echo \"export JAVA_HOME=/usr/lib/jvm/temurin-${PARAM_JAVA_VER}-jdk-amd64\" >> \"$BASH_ENV\"\n        ;;\n      \"zulu\")\n        sudo apt update\n        sudo apt install gnupg software-properties-common\n        wget -qO - https://repos.azul.com/azul-repo.key | sudo apt-key add -\n        sudo apt-add-repository -y 'deb http://repos.azul.com/zulu/deb stable main'\n        sudo apt update\n        sudo apt install zulu\"${PARAM_JAVA_VER}\"-jdk\n        sudo update-alternatives --install /usr/bin/java java /usr/lib/jvm/zulu\"${PARAM_JAVA_VER}\"-ca-amd64/bin/java 1\n        sudo update-alternatives --install /usr/bin/javac javac /usr/lib/jvm/zulu\"${PARAM_JAVA_VER}\"-ca-amd64/bin/javac 1\n        sudo update-alternatives --set javac /usr/lib/jvm/zulu\"${PARAM_JAVA_VER}\"-ca-amd64/bin/javac\n        sudo update-alternatives --set java /usr/lib/jvm/zulu\"${PARAM_JAVA_VER}\"-ca-amd64/bin/java\n        echo \"export JAVA_HOME=/usr/lib/jvm/zulu-${PARAM_JAVA_VER}-ca-amd64\" >> \"$BASH_ENV\"\n        ;;\n      *)\n        echo \"Unknown distribution: ${PARAM_DISTRIBUTION}\"\n        return 1\n        ;;\n    esac\n  fi\n  echo \"export PATH=\\$JAVA_HOME/bin:\\$PATH\" >> \"$BASH_ENV\"\nfi\nNEW_DISTRIBUTION=\"$(java -version 2>&1 | tr '[:upper:]' '[:lower:]' | grep -Eo 'corretto|temurin|zulu' | head -n1 || echo \"openjdk\")\"\nNEW_JAVA_VER=\"$(java -version 2>&1 | head -1 | cut -d'\"' -f2 | sed '/^1\\./s///' | cut -d'.' -f1)\"\nNEW_JAVAC_VER=\"$(javac -version 2>&1 | head -1 | cut -f 2- -d ' ' | sed '/^1\\./s///' | cut -d'.' -f1)\"\necho \"New Java Distribution: $NEW_DISTRIBUTION\"\necho \"New Java Version : $NEW_JAVA_VER\"\necho \"New Java Compiler Version : $NEW_JAVAC_VER\"\n"
+                environment:
+                    PARAM_DISTRIBUTION: << parameters.distribution >>
+                    PARAM_JAVA_VER: << parameters.java_version >>
+                name: Change << parameters.distribution >> version to << parameters.java_version >>
+    change_malloc:
+        description: |
+            Change default malloc from glibc malloc to jemalloc
+        parameters:
+            implementation:
+                default: jemalloc
+                enum:
+                    - jemalloc
+                    - tcmalloc
+                type: enum
+        steps:
+            - run:
+                command: |
+                    #!/bin/bash
+
+                    sudo apt update
+
+                    if [[ ${PARAM_IMPLEMENTATION} == "jemalloc" ]]; then
+                        sudo apt install libjemalloc-dev
+                        echo "LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libjemalloc.so.2" | sudo tee -a /etc/environment
+                    else
+                        sudo apt install google-perftools
+                        echo "LD_PRELOAD=/usr/lib/x86_64-linux-gnu/libtcmalloc.so.4" | sudo tee -a /etc/environment
+                    fi
+                environment:
+                    PARAM_IMPLEMENTATION: << parameters.implementation >>
+                name: change malloc implementation to << parameters.implementation >>
+    create_avd:
+        description: |
+            Create an AVD.
+        parameters:
+            additional_args:
+                default: ""
+                description: |
+                    Additional args to be passed directly to the avd creation command
+                    You can pass environment variables, using the $ syntax e.g. "$ADDITIONAL_ARGS"
+                type: string
+            avd_name:
+                description: |
+                    The name of the AVD to create.
+                    You can pass environment variables, using the $ syntax e.g. "$AVD_NAME"
+                type: string
+            background:
+                default: false
+                description: |
+                    Whether to run the creation command in background
+                type: boolean
+            install:
+                description: |
+                    Whether to first install the system image via sdkmanager
+                type: boolean
+            system_image:
+                description: |
+                    Name of system image e.g. "system-images;android-29;default;x86".
+                    It should match the name seen in the "sdkmanager --list" output.
+                    You can pass environment variables, using the $ syntax e.g. "$SYSTEM_IMAGE"
+                type: string
+        steps:
+            - run:
+                background: << parameters.background >>
+                command: |
+                    #!/bin/bash
+                    PARAM_AVD_NAME="$(echo "$PARAM_AVD_NAME" | circleci env subst "$PARAM_AVD_NAME")"
+                    PARAM_SYSTEM_IMAGE="$(echo "$PARAM_SYSTEM_IMAGE" | circleci env subst "$PARAM_SYSTEM_IMAGE")"
+                    PARAM_ADDITIONAL_ARGS="$(circleci env subst -- "$PARAM_ADDITIONAL_ARGS")"
+
+                    if [ "${PARAM_INSTALL}" == 1 ]; then
+                        sdkmanager "${PARAM_SYSTEM_IMAGE}"
+                    fi
+
+                    echo "no" | avdmanager --verbose create avd -n ${PARAM_AVD_NAME} -k ${PARAM_SYSTEM_IMAGE} ${PARAM_ADDITIONAL_ARGS}
+                environment:
+                    PARAM_ADDITIONAL_ARGS: << parameters.additional_args >>
+                    PARAM_AVD_NAME: << parameters.avd_name >>
+                    PARAM_INSTALL: << parameters.install >>
+                    PARAM_SYSTEM_IMAGE: << parameters.system_image >>
+                name: Create avd "<< parameters.avd_name >>"
+    create_google_play_key:
+        description: |
+            Generate JSON file for your google play key. For use with environment variables.
+        parameters:
+            google_play_key:
+                default: GOOGLE_PLAY_KEY
+                description: Your google play key
+                type: env_var_name
+            working_directory:
+                default: .
+                description: Working directory to create google play key in
+                type: string
+        steps:
+            - run:
+                command: echo ${<< parameters.google_play_key >>} > google-play-key.json
+                name: Create Google Play key
+                working_directory: << parameters.working_directory >>
+    create_keystore_properties:
+        description: |
+            Creates a keystore.properties file for use in deployment steps. For use with environment variables.
+        parameters:
+            release_key_alias:
+                default: RELEASE_KEY_ALIAS
+                description: Release key alias
+                type: env_var_name
+            release_key_password:
+                default: RELEASE_KEY_PASSWORD
+                description: Password for your release key
+                type: env_var_name
+            release_keystore:
+                default: ./keystore
+                description: Points to the location of your decrypted keystore
+                type: string
+            release_store_password:
+                default: RELEASE_STORE_PASSWORD
+                description: Password for your keystore
+                type: env_var_name
+            working_directory:
+                default: .
+                description: Working directory to create keystore.properties in
+                type: string
+        steps:
+            - run:
+                command: |-
+                    #!/bin/bash
+
+                    # RELEASE_KEY_ALIAS=$(eval echo "\$$PARAM_RELEASE_KEY_ALIAS")
+                    # RELEASE_KEY_PASSWORD=$(eval echo "\$$PARAM_RELEASE_KEY_PASSWORD")
+                    # RELEASE_STORE_PASSWORD=$(eval echo "\$$PARAM_RELEASE_STORE_PASSWORD")
+
+                    RELEASE_KEY_ALIAS="${!PARAM_RELEASE_KEY_ALIAS}"
+                    RELEASE_KEY_PASSWORD="${!PARAM_RELEASE_KEY_PASSWORD}"
+                    RELEASE_STORE_PASSWORD="${!PARAM_RELEASE_STORE_PASSWORD}"
+
+                    printf 'releaseKeyAlias=%s\nreleaseKeyPassword=%s\nreleaseKeyStore=%s\nreleaseStorePassword=%s' \
+                                "$RELEASE_KEY_ALIAS" "$RELEASE_KEY_PASSWORD" "${PARAM_RELEASE_KEYSTORE}" "$RELEASE_STORE_PASSWORD" > keystore.properties
+                environment:
+                    PARAM_RELEASE_KEY_ALIAS: << parameters.release_key_alias >>
+                    PARAM_RELEASE_KEY_PASSWORD: << parameters.release_key_password >>
+                    PARAM_RELEASE_KEYSTORE: << parameters.release_keystore >>
+                    PARAM_RELEASE_STORE_PASSWORD: << parameters.release_store_password >>
+                name: Create keystore.properties
+                working_directory: << parameters.working_directory >>
+    decode_keystore:
+        description: |
+            Decodes a keystore that was encrypted in base64. For use with environment variables.
+        parameters:
+            base64_keystore:
+                default: BASE64_KEYSTORE
+                description: Your base64 keystore
+                type: env_var_name
+            keystore_location:
+                default: .
+                description: The location of your decrypted keystore
+                type: string
+        steps:
+            - run:
+                command: |
+                    #!/bin/bash
+
+                    PARAM_BASE64_KEYSTORE=$(eval echo "\$$PARAM_BASE64_KEYSTORE")
+
+                    echo "$PARAM_BASE64_KEYSTORE" | base64 -di | tee keystore "${PARAM_KEYSTORE_LOCATION}" > /dev/null
+                environment:
+                    PARAM_BASE64_KEYSTORE: << parameters.base64_keystore >>
+                    PARAM_KEYSTORE_LOCATION: << parameters.keystore_location >>
+                name: Decode Keystore
+    disable_animations:
+        description: |
+            Disables animations. Requires an emulator to be running.
+        steps:
+            - run:
+                command: |-
+                    #!/bin/bash
+                    adb shell settings put global window_animation_scale 0.0
+                    adb shell settings put global transition_animation_scale 0.0
+                    adb shell settings put global animator_duration_scale 0.0
+                name: Disable emulator animations
+    fastlane_deploy:
+        description: |
+            Runs fastlane lanes to deploy to Google Play Store
+        parameters:
+            lane_name:
+                default: deploy
+                description: The name of the lane fastlane will execute
+                type: string
+            working_directory:
+                default: .
+                description: Working directory to run fastlane commands in
+                type: string
+        steps:
+            - run:
+                command: fastlane << parameters.lane_name >>
+                name: Run fastlane
+                working_directory: << parameters.working_directory >>
+    install_ndk:
+        description: |
+            Install an Android NDK version using 'sdkmanager'. This command takes one
+            parameter called 'ndk', which is the NDK version. If the version is already
+            available, the step will still complete successfully.
+
+            This command is designed to be used with the CircleCI Android Docker or
+            machine images.
+
+            Available NDK versions can be found here:
+            https://github.com/android/compose-samples
+        parameters:
+            version:
+                description: |
+                    Version of the NDK to install. Available NDK versions can be found here:
+                    https://github.com/android/compose-samples
+                type: string
+        steps:
+            - run:
+                command: |-
+                    #!/bin/bash
+                    echo y | sdkmanager "ndk;${PARAM_VER}"
+                    android_ndk_home=""
+                      if [[ -d "${HOME}/android-sdk/ndk/${PARAM_VER}" ]]; then
+                        android_ndk_home="$HOME/android-sdk/ndk/${PARAM_VER}"
+                      elif [[ -d "/opt/android/sdk/ndk/${PARAM_VER}" ]]; then
+                        android_ndk_home="/opt/android/sdk/ndk/${PARAM_VER}"
+                      else
+                        echo "Android NDK did not install successfully"
+                        exit 1
+                      fi
+                    echo "export ANDROID_NDK_HOME=$android_ndk_home" >> "$BASH_ENV"
+                    echo "Android NDK was installed at \"$android_ndk_home\"."
+                environment:
+                    PARAM_VER: << parameters.version >>
+                name: Install Android NDK
+    kill_emulators:
+        description: |
+            Terminates any running emulator processes
+        steps:
+            - run:
+                command: |-
+                    #!/bin/bash
+                    # shellcheck disable=SC2154
+                    adb devices | grep emulator | cut -f1 | while read -r line; do adb -s $line emu kill; done
+                name: Kill any running emulators
+    restore_build_cache:
+        description: |
+            Restore the build cache. See `save_build_cache` for more information.
+        parameters:
+            cache_prefix:
+                default: v1
+                description: Used to form part of the cache key
+                type: string
+        steps:
+            - restore_cache:
+                key: android-orb-<<parameters.cache_prefix>>
+                name: Restore build cache
+    restore_gradle_cache:
+        description: |
+            Restore gradle cache
+        parameters:
+            cache_prefix:
+                default: v1
+                description: Used to form part of the cache key
+                type: string
+            find_args:
+                default: . -name "build.gradle*" -o -name "settings.gradle*"
+                description: |
+                    Use this to customize how the find command is used to look for relevant
+                    file changes.
+                type: string
+        steps:
+            - run:
+                command: "#!/bin/bash\necho \"The following are the files used to generate the cache checksum:\"\neval find \"${PARAM_FIND_ARGS}\"\neval find \"${PARAM_FIND_ARGS}\" | sort | xargs cat |\nshasum | awk '{print $1}' > /tmp/gradle_cache_seed \n"
+                environment:
+                    PARAM_FIND_ARGS: << parameters.find_args >>
+                name: Generate cache checksum
+            - restore_cache:
+                key: gradle-<< parameters.cache_prefix>>-{{ arch }}-{{ checksum "/tmp/gradle_cache_seed" }}
+                name: Restore gradle cache
+    run_tests:
+        description: |
+            Runs tests, with retries supported
+        parameters:
+            max_tries:
+                default: 2
+                description: Max number of tries. To disable retries, set this to 1.
+                type: integer
+            no_output_timeout:
+                default: 10m
+                description: Use this to configure the no_output_timeout value
+                type: string
+            pre_test_command:
+                default: ' '
+                description: |
+                    Command to run prior to runnning the test command
+                    You can pass environment variables, using the $ syntax e.g. "$PRE_TEST_COMMAND"
+                type: string
+            pull_data:
+                default: false
+                description: |
+                    Whether to pull data after running tests
+                type: boolean
+            pull_data_path:
+                default: data
+                description: |
+                    Emulator directory to pull data from
+                type: string
+            pull_data_target:
+                default: .
+                description: |
+                    Location to save pulled data
+                type: string
+            retry_interval:
+                default: 5
+                description: Duration in seconds to wait before the next try
+                type: integer
+            test_command:
+                default: ./gradlew connectedDebugAndroidTest
+                description: |
+                    Command to run in order to run the tests
+                    You can pass environment variables, using the $ syntax e.g. "$TEST_COMMAND"
+                type: string
+            working_directory:
+                default: .
+                description: Working directory to run the tests in
+                type: string
+        steps:
+            - run:
+                command: |
+                    #!/bin/bash
+                    PARAM_PRE_TEST_COMMAND="$(echo "$PARAM_PRE_TEST_COMMAND" | circleci env subst "$PARAM_PRE_TEST_COMMAND")"
+                    PARAM_TEST_COMMAND="$(echo "$PARAM_TEST_COMMAND" | circleci env subst "$PARAM_TEST_COMMAND")"
+
+                    run_with_retry() {
+                      MAX_TRIES=${PARAM_MAX_TRIES}
+                      n=1
+                      until [ $n -gt $MAX_TRIES ]; do
+                        echo "Starting test attempt $n"
+                        eval "${PARAM_PRE_TEST_COMMAND}"
+                        eval "${PARAM_TEST_COMMAND}" && break
+                        n=$((n + 1))
+                        sleep "${PARAM_RETRY_INTERVAL}"
+                      done
+                      if [ $n -gt $MAX_TRIES ]; then
+                        echo "Max tries reached (${PARAM_MAX_TRIES})"
+                        exit 1
+                      fi
+                    }
+                    run_with_retry
+                environment:
+                    PARAM_MAX_TRIES: << parameters.max_tries >>
+                    PARAM_PRE_TEST_COMMAND: << parameters.pre_test_command >>
+                    PARAM_RETRY_INTERVAL: << parameters.retry_interval >>
+                    PARAM_TEST_COMMAND: << parameters.test_command >>
+                name: Run tests with max tries of <<parameters.max_tries>>
+                no_output_timeout: <<parameters.no_output_timeout>>
+                working_directory: <<parameters.working_directory>>
+            - when:
+                condition: << parameters.pull_data >>
+                steps:
+                    - run: adb pull << parameters.pull_data_path >> << parameters.pull_data_target >>
+    save_build_cache:
+        description: |
+            Save the Android build-cache. The build cache stores certain outputs that the Android plugin for Gradle generates when building your project (such as unpackaged AARs and pre-dexed remote dependencies). Your clean builds are much faster while using the cache because the build system can simply reuse those cached files during subsequent builds, instead of recreating them. The build cache also works on continuous integration servers and when running multiple build processes on a single local machine.
+            See https://developer.android.com/studio/build/build-cache
+        parameters:
+            cache_prefix:
+                default: v1
+                description: Used to form part of the cache key
+                type: string
+        steps:
+            - save_cache:
+                key: android-orb-<<parameters.cache_prefix>>
+                name: Save build cache
+                paths:
+                    - ~/.android/build-cache
+                    - ~/.android/cache
+    save_gradle_cache:
+        description: |
+            Save gradle cache
+        parameters:
+            cache_prefix:
+                default: v1
+                description: Used to form part of the cache key
+                type: string
+        steps:
+            - save_cache:
+                key: gradle-<< parameters.cache_prefix>>-{{ arch }}-{{ checksum "/tmp/gradle_cache_seed" }}
+                name: Save gradle cache
+                paths:
+                    - ~/.gradle/caches
+                    - ~/.gradle/wrapper
+                    - .gradle/configuration-cache
+    start_emulator:
+        description: |
+            Start an emulator as a background process.
+            The AVD used should already be created. (See "create_avd" command for how
+            one could be created)
+        parameters:
+            additional_args:
+                default: ""
+                description: |
+                    Additional args to be passed directly to the emulator command
+                type: string
+            avd_name:
+                description: |
+                    The name of the existing AVD to use for the emulator
+                type: string
+            camera_back:
+                default: ""
+                description: |
+                    The value to use for the "-camera-back" flag.
+                    If set to "", the emulator will be run without the -camera-back flag.
+                type: string
+            camera_front:
+                default: ""
+                description: |
+                    The value to use for the "-camera-front" flag.
+                    If set to "", the emulator will be run without the -camera-front flag.
+                type: string
+            delay_adb:
+                default: false
+                description: |
+                    Whether to run the emulator with the -delay-adb flag
+                type: boolean
+            disable_animations:
+                default: true
+                description: |
+                    Whether to disable animations that may interfere with tests, after the emulator starts up
+                type: boolean
+            gpu:
+                default: swiftshader_indirect
+                description: |
+                    The value to use for the "-gpu" flag.
+                    If set to "", the emulator will be run without the -gpu flag.
+                type: string
+            memory:
+                default: -1
+                description: |
+                    The value to use for the "-memory" flag.
+                    If set to -1, the emulator will be run without the -memory flag.
+                type: integer
+            no_audio:
+                default: true
+                description: |
+                    Whether to run the emulator with the -noaudio flag
+                type: boolean
+            no_boot_anim:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-boot-anim flag
+                type: boolean
+            no_snapshot:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-snapshot flag
+                type: boolean
+            no_window:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-window flag
+                type: boolean
+            override_args:
+                default: ""
+                description: |
+                    If this is set to a non-blank value, the emulator command will be
+                    run with the -avd flag and the value of "override_args" (i.e. none of the defaults
+                    provided by the orb command will be used)
+                type: string
+            post_emulator_launch_assemble_command:
+                default: ./gradlew assembleDebugAndroidTest
+                description: |
+                    If this is set to a non-blank value, the configured command will be run
+                    after the emulator has been launched, and before commencing the
+                    wait for the emulator to finish starting up.
+                type: string
+            post_emulator_wait_steps:
+                default: []
+                description: |
+                    Steps to execute after waiting for the emulator to start up
+                type: steps
+            pre_emulator_wait_steps:
+                default: []
+                description: |
+                    Steps to execute while before beginning to wait for the emulator to start up
+                type: steps
+            restore_gradle_cache_find_args:
+                default: . -name "build.gradle*" -o -name "settings.gradle*"
+                description: |
+                    Use this to customize how the find command is used to look for relevant
+                    file changes.
+                type: string
+            restore_gradle_cache_post_emulator_launch:
+                default: true
+                description: |
+                    Whether to restore the gradle cache after the emulator has been launched,
+                    and before commencing the wait for the emulator to finish starting up.
+                type: boolean
+            restore_gradle_cache_prefix:
+                default: v1
+                description: |
+                    Cache prefix used if the "restore_gradle_cache_post_emulator_launch" parameter
+                    is set to true.
+                type: string
+            run_logcat:
+                default: false
+                description: |
+                    Whether to run with logcat in the background, after the emulator starts up
+                type: boolean
+            verbose:
+                default: true
+                description: |
+                    Whether to run the emulator with the -verbose flag
+                type: boolean
+            wait_for_emulator:
+                default: true
+                description: |
+                    Whether to wait for the emulator to start up
+                type: boolean
+        steps:
+            - run:
+                background: true
+                command: |
+                    #!/bin/bash
+                    if [ -n "${PARAM_OVERRIDE_ARGS}" ]; then
+                      echo "override-args parameter was supplied; orb defaults will be overridden"
+                      emulator -avd ${PARAM_AVD_NAME} ${PARAM_OVERRIDE_ARGS}
+                    else
+                      if [ "${PARAM_NO_WINDOW}" -eq 1 ]; then
+                        set -- "$@" -no-window
+                      fi
+                      if [ "${PARAM_NO_AUDIO}" -eq 1 ]; then
+                        set -- "$@" -no-audio
+                      fi
+                      if [ "${PARAM_NO_BOOT_ANIM}" -eq 1 ]; then
+                        set -- "$@" -no-boot-anim
+                      fi
+                      if [ "${PARAM_VERBOSE}" -eq 1 ]; then
+                        set -- "$@" -verbose
+                      fi
+                      if [ "${PARAM_NO_SNAPSHOT}" -eq 1 ]; then
+                        set -- "$@" -no-snapshot
+                      fi
+                      if [ "${PARAM_DELAY_ABD}" -eq 1 ]; then
+                        set -- "$@" -delay-adb
+                      fi
+                      if [ "${PARAM_MEMORY}" != "-1" ]; then
+                        set -- "$@" -memory ${PARAM_MEMORY}
+                      fi
+                      if [ -n "${PARAM_GPU}" ]; then
+                        set -- "$@" -gpu "${PARAM_GPU}"
+                      fi
+                      if [ -n "${PARAM_CAMERA_FRONT}" ]; then
+                        set -- "$@" -camera-front "${PARAM_CAMERA_FRONT}"
+                      fi
+                      if [ -n "${PARAM_CAMERA_BACK}" ]; then
+                        set -- "$@" -camera-back "${PARAM_CAMERA_BACK}"
+                      fi
+                      echo "Starting emulator with arguments $* ${PARAM_ADDITIONAL_ARGS}"
+                      emulator -avd ${PARAM_AVD_NAME} "$@" ${PARAM_ADDITIONAL_ARGS}
+                    fi
+                environment:
+                    PARAM_ADDITIONAL_ARGS: << parameters.additional_args >>
+                    PARAM_AVD_NAME: << parameters.avd_name >>
+                    PARAM_CAMERA_BACK: << parameters.camera_back >>
+                    PARAM_CAMERA_FRONT: << parameters.camera_front >>
+                    PARAM_DELAY_ABD: << parameters.delay_adb >>
+                    PARAM_GPU: << parameters.gpu >>
+                    PARAM_MEMORY: << parameters.memory >>
+                    PARAM_NO_AUDIO: << parameters.no_audio >>
+                    PARAM_NO_BOOT_ANIM: << parameters.no_boot_anim >>
+                    PARAM_NO_SNAPSHOT: << parameters.no_snapshot >>
+                    PARAM_NO_WINDOW: << parameters.no_window >>
+                    PARAM_OVERRIDE_ARGS: << parameters.override_args >>
+                    PARAM_VERBOSE: << parameters.verbose >>
+                name: Start emulator
+            - when:
+                condition:
+                    and:
+                        - << parameters.restore_gradle_cache_post_emulator_launch >>
+                        - equal:
+                            - true
+                            - << parameters.wait_for_emulator >>
+                steps:
+                    - restore_gradle_cache:
+                        cache_prefix: << parameters.restore_gradle_cache_prefix >>
+                        find_args: << parameters.restore_gradle_cache_find_args >>
+            - when:
+                condition:
+                    and:
+                        - << parameters.post_emulator_launch_assemble_command >>
+                        - equal:
+                            - true
+                            - << parameters.wait_for_emulator >>
+                steps:
+                    - run:
+                        command: |
+                            # This is meant to do something useful in parallel with the emulator
+                            # starting up, like assembling the app, which is required for UI tests
+                            << parameters.post_emulator_launch_assemble_command >>
+                        name: 'Run: << parameters.post_emulator_launch_assemble_command >>'
+            - when:
+                condition: << parameters.wait_for_emulator >>
+                steps:
+                    - << parameters.pre_emulator_wait_steps >>
+            - when:
+                condition: << parameters.wait_for_emulator >>
+                steps:
+                    - wait_for_emulator
+                    - when:
+                        condition: << parameters.run_logcat >>
+                        steps:
+                            - run:
+                                background: true
+                                command: |
+                                    adb logcat
+                                name: Logcat
+                    - when:
+                        condition: << parameters.disable_animations >>
+                        steps:
+                            - disable_animations
+                    - << parameters.post_emulator_wait_steps >>
+    start_emulator_and_run_tests:
+        description: |
+            Creates an AVD, starts an emulator and runs tests.
+            This is a wrapper command that wraps the
+            create_avd, start_emulator and run_tests commands.
+        parameters:
+            additional_avd_args:
+                default: ""
+                description: |
+                    Additional args to be passed directly to the avd creation command.
+                    You can pass environment variables, using the $ syntax e.g. "$ADDITIONAL_ARGS"
+                type: string
+            additional_emulator_args:
+                default: ""
+                description: |
+                    Additional args to be passed directly to the emulator command
+                type: string
+            avd_name:
+                default: test
+                description: |
+                    The name of the AVD to create.
+                    You can pass environment variables, using the $ syntax e.g. "$AVD_NAME"
+                type: string
+            camera_back:
+                default: ""
+                description: |
+                    The value to use for the "-camera-back" flag.
+                    If set to "", the emulator will be run without the -camera-back flag.
+                type: string
+            camera_front:
+                default: ""
+                description: |
+                    The value to use for the "-camera-front" flag.
+                    If set to "", the emulator will be run without the -camera-front flag.
+                type: string
+            delay_adb:
+                default: false
+                description: |
+                    Whether to run the emulator with the -delay-adb flag
+                type: boolean
+            disable_animations:
+                default: true
+                description: |
+                    Whether to disable animations that may interfere with tests, after the emulator starts up
+                type: boolean
+            gpu:
+                default: swiftshader_indirect
+                description: |
+                    The value to use for the "-gpu" flag.
+                    If set to "", the emulator will be run without the -gpu flag.
+                type: string
+            install_system_image:
+                default: true
+                description: |
+                    Whether to first install the system image via sdkmanager
+                type: boolean
+            kill_emulators:
+                default: true
+                description: |
+                    Whether to kill the emulators after the tests complete
+                type: boolean
+            max_tries:
+                default: 2
+                description: Max number of tries. To disable retries, set this to 1.
+                type: integer
+            memory:
+                default: -1
+                description: |
+                    The value to use for the "-memory" flag.
+                    If set to -1, the emulator will be run without the -memory flag.
+                type: integer
+            no_audio:
+                default: true
+                description: |
+                    Whether to run the emulator with the -noaudio flag
+                type: boolean
+            no_boot_anim:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-boot-anim flag
+                type: boolean
+            no_output_timeout:
+                default: 10m
+                description: |
+                    Use this to configure the no_output_timeout value of the test run
+                type: string
+            no_snapshot:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-snapshot flag
+                type: boolean
+            no_window:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-window flag
+                type: boolean
+            override_emulator_args:
+                default: ""
+                description: |
+                    If this is set to a non-blank value, the emulator command will be
+                    run with the -avd flag and the value of "override_args" (i.e. none of the defaults
+                    provided by the orb command will be used)
+                type: string
+            post_emulator_launch_assemble_command:
+                default: ./gradlew assembleDebugAndroidTest
+                description: |
+                    If this is set to a non-blank value, the configured command will be run
+                    after the emulator has been launched, and before commencing the
+                    wait for the emulator to finish starting up.
+                type: string
+            post_emulator_wait_steps:
+                default: []
+                description: |
+                    Steps to execute after waiting for the emulator to start up
+                type: steps
+            post_run_tests_steps:
+                default: []
+                description: |
+                    Steps to run after the tests
+                type: steps
+            pre_emulator_wait_steps:
+                default: []
+                description: |
+                    Steps to execute while before beginning to wait for the emulator to start up
+                type: steps
+            pre_run_tests_steps:
+                default: []
+                description: |
+                    Steps to run before the tests
+                type: steps
+            pre_test_command:
+                default: ' '
+                description: |
+                    Command to run prior to runnning the test command
+                    You can pass environment variables, using the $ syntax e.g. "$PRE_TEST_COMMAND"
+                type: string
+            pull_data:
+                default: false
+                description: |
+                    Whether to pull data after running tests
+                type: boolean
+            pull_data_path:
+                default: data
+                description: |
+                    Emulator directory to pull data from
+                type: string
+            pull_data_target:
+                default: .
+                description: |
+                    Location to save pulled data
+                type: string
+            restore_gradle_cache_find_args:
+                default: . -name "build.gradle*" -o -name "settings.gradle*"
+                description: |
+                    Use this to customize how the find command is used to look for relevant
+                    file changes.
+                type: string
+            restore_gradle_cache_post_emulator_launch:
+                default: true
+                description: |
+                    Whether to restore the gradle cache after the emulator has been launched,
+                    and before commencing the wait for the emulator to finish starting up.
+                type: boolean
+            restore_gradle_cache_prefix:
+                default: v1
+                description: |
+                    Cache prefix used if the "restore_gradle_cache_post_emulator_launch" parameter
+                    is set to true.
+                type: string
+            retry_interval:
+                default: 5
+                description: Duration in seconds to wait before the next try
+                type: integer
+            run_logcat:
+                default: false
+                description: |
+                    Whether to run with logcat in the background, after the emulator starts up
+                type: boolean
+            run_tests_working_directory:
+                default: .
+                description: Working directory to run the tests in
+                type: string
+            save_gradle_cache:
+                default: true
+                description: |
+                    Whether to write to the gradle cache after the tests have run
+                type: boolean
+            system_image:
+                default: system-images;android-29;default;x86
+                description: |
+                    Name of system image e.g. "system-images;android-29;default;x86".
+                    It should match the name seen in the "sdkmanager --list" output.
+                    You can pass environment variables, using the $ syntax e.g. "$SYSTEM_IMAGE"
+                type: string
+            test_command:
+                default: ./gradlew connectedDebugAndroidTest
+                description: |
+                    Command to run in order to run the tests
+                    You can pass environment variables, using the $ syntax e.g. "$TEST_COMMAND"
+                type: string
+            verbose:
+                default: true
+                description: |
+                    Whether to run the emulator with the -verbose flag
+                type: boolean
+            wait_for_emulator:
+                default: true
+                description: |
+                    Whether to wait for the emulator to start up
+                type: boolean
+        steps:
+            - create_avd:
+                additional_args: << parameters.additional_avd_args >>
+                avd_name: << parameters.avd_name >>
+                install: << parameters.install_system_image >>
+                system_image: <<parameters.system_image>>
+            - start_emulator:
+                additional_args: << parameters.additional_emulator_args >>
+                avd_name: << parameters.avd_name >>
+                camera_back: << parameters.camera_back >>
+                camera_front: << parameters.camera_front >>
+                delay_adb: << parameters.delay_adb >>
+                disable_animations: << parameters.disable_animations >>
+                gpu: << parameters.gpu >>
+                memory: << parameters.memory >>
+                no_audio: << parameters.no_audio >>
+                no_boot_anim: << parameters.no_boot_anim >>
+                no_snapshot: << parameters.no_snapshot >>
+                no_window: << parameters.no_window >>
+                override_args: << parameters.override_emulator_args >>
+                post_emulator_launch_assemble_command: << parameters.post_emulator_launch_assemble_command >>
+                post_emulator_wait_steps: << parameters.post_emulator_wait_steps >>
+                pre_emulator_wait_steps: << parameters.pre_emulator_wait_steps >>
+                restore_gradle_cache_find_args: << parameters.restore_gradle_cache_find_args >>
+                restore_gradle_cache_post_emulator_launch: << parameters.restore_gradle_cache_post_emulator_launch >>
+                restore_gradle_cache_prefix: << parameters.restore_gradle_cache_prefix >>
+                run_logcat: << parameters.run_logcat >>
+                verbose: << parameters.verbose >>
+                wait_for_emulator: << parameters.wait_for_emulator >>
+            - << parameters.pre_run_tests_steps >>
+            - run_tests:
+                max_tries: << parameters.max_tries >>
+                no_output_timeout: << parameters.no_output_timeout >>
+                pre_test_command: << parameters.pre_test_command >>
+                pull_data: << parameters.pull_data >>
+                pull_data_path: << parameters.pull_data_path >>
+                pull_data_target: << parameters.pull_data_target >>
+                retry_interval: << parameters.retry_interval >>
+                test_command: << parameters.test_command >>
+                working_directory: << parameters.run_tests_working_directory >>
+            - << parameters.post_run_tests_steps >>
+            - when:
+                condition: << parameters.save_gradle_cache >>
+                steps:
+                    - save_gradle_cache:
+                        cache_prefix: << parameters.restore_gradle_cache_prefix >>
+            - when:
+                condition: << parameters.kill_emulators >>
+                steps:
+                    - kill_emulators
+    wait_for_emulator:
+        description: |
+            Wait for the emulator to start.
+            Requires the "circle-android" script to be present in PATH.
+        steps:
+            - run:
+                command: |
+                    circle-android wait-for-boot
+                name: Wait for the emulator to start
+executors:
+    android_docker:
+        description: |
+            Select a CircleCI convenience image to get building on Android.
+            See https://circleci.com/developer/images/image/cimg/android#image-tags for a full list of
+            the available images.
+        docker:
+            - image: cimg/android:<< parameters.tag >>
+        parameters:
+            resource_class:
+                default: medium
+                description: Resource class used for the executor.
+                enum:
+                    - small
+                    - medium
+                    - medium+
+                    - large
+                    - xlarge
+                    - 2xlarge
+                    - 2xlarge+
+                    - medium.gen2
+                    - large.gen2
+                    - xlarge.gen2
+                    - 2xlarge.gen2
+                    - 2xlarge+.gen2
+                type: enum
+            tag:
+                description: |
+                    The Android image tag to use.
+                    Choose a tag from https://circleci.com/developer/images/image/cimg/android#image-tags.
+                type: string
+        resource_class: << parameters.resource_class >>
+    android_machine:
+        description: |
+            This selects an Android machine image.
+            CircleCI's Android machine images are recommended for Android emulator tests.
+        machine:
+            image: android:<< parameters.tag >>
+            resource_class: << parameters.resource_class >>
+        parameters:
+            resource_class:
+                default: large
+                description: |
+                    Resource class used for the executor. It is recommended
+                    to use large and above to avoid memory issues such as process
+                    crashes when running emulator tests.
+                enum:
+                    - medium
+                    - large
+                    - xlarge
+                    - 2xlarge
+                    - medium.gen2
+                    - large.gen2
+                    - xlarge.gen2
+                    - 2xlarge.gen2
+                    - 2xlarge+.gen2
+                type: enum
+            tag:
+                description: |
+                    Name of CircleCI Android machine image to use.
+                    Android machine tags can be found at https://circleci.com/developer/machine/image/android#image-tags
+                type: string
+jobs:
+    build:
+        description: |
+            Start building an Android project on CircleCI
+        executor: << parameters.executor >>
+        parameters:
+            executor:
+                description: Executor for the job
+                type: executor
+        steps:
+            - checkout
+            - accept_licenses
+    deploy_to_play_store:
+        description: |
+            Deploy an android app on CircleCI to the Google Play Store using Fastlane. For use with CirceCI Environment Variables.
+        executor: << parameters.executor >>
+        parameters:
+            base64_keystore:
+                default: BASE64_KEYSTORE
+                description: Your base64 keystore
+                type: env_var_name
+            checkout:
+                default: true
+                description: Whether to run the checkout step
+                type: boolean
+            executor:
+                description: Executor for the job
+                type: executor
+            fastlane_working_directory:
+                default: .
+                description: Working directory to run fastlane commands in
+                type: string
+            google_play_key:
+                default: GOOGLE_PLAY_KEY
+                description: Your google play key
+                type: env_var_name
+            keystore_location:
+                default: .
+                description: The location of your decrypted keystore
+                type: string
+            keystore_properties_working_directory:
+                default: .
+                description: Working directory to create keystore.properties in
+                type: string
+            lane_name:
+                default: deploy
+                description: The name of the lane fastlane will execute
+                type: string
+            release_key_alias:
+                default: RELEASE_KEY_ALIAS
+                description: Release key alias
+                type: env_var_name
+            release_key_password:
+                default: RELEASE_KEY_PASSWORD
+                description: Password for your release key
+                type: env_var_name
+            release_keystore:
+                default: ./keystore
+                description: Points to the location of your decrypted keystore
+                type: string
+            release_store_password:
+                default: RELEASE_STORE_PASSWORD
+                description: Password for your keystore
+                type: env_var_name
+        steps:
+            - when:
+                condition: << parameters.checkout >>
+                steps:
+                    - checkout
+            - decode_keystore:
+                base64_keystore: << parameters.base64_keystore >>
+                keystore_location: << parameters.keystore_location >>
+            - create_keystore_properties:
+                release_key_alias: << parameters.release_key_alias >>
+                release_key_password: << parameters.release_key_password >>
+                release_keystore: << parameters.release_keystore >>
+                release_store_password: << parameters.release_store_password >>
+                working_directory: << parameters.keystore_properties_working_directory >>
+            - create_google_play_key:
+                google_play_key: << parameters.google_play_key >>
+            - fastlane_deploy:
+                lane_name: << parameters.lane_name >>
+                working_directory: << parameters.fastlane_working_directory >>
+    run_ui_tests:
+        description: |
+            Creates an AVD, starts an emulator and runs Android UI tests.
+            This is a job that wraps the "start_emulator_and_run_tests" command.
+        executor: << parameters.executor >>
+        parameters:
+            additional_avd_args:
+                default: ""
+                description: |
+                    Additional args to be passed directly to the avd creation command
+                type: string
+            additional_emulator_args:
+                default: ""
+                description: |
+                    Additional args to be passed directly to the emulator command
+                type: string
+            avd_name:
+                default: test
+                description: |
+                    The name of the AVD to create
+                type: string
+            camera_back:
+                default: ""
+                description: |
+                    The value to use for the "-camera-back" flag.
+                    If set to "", the emulator will be run without the -camera-back flag.
+                type: string
+            camera_front:
+                default: ""
+                description: |
+                    The value to use for the "-camera-front" flag.
+                    If set to "", the emulator will be run without the -camera-front flag.
+                type: string
+            checkout:
+                default: true
+                description: Whether to run the checkout step
+                type: boolean
+            delay_adb:
+                default: false
+                description: |
+                    Whether to run the emulator with the -delay-adb flag
+                type: boolean
+            disable_animations:
+                default: true
+                description: |
+                    Whether to disable animations that may interfere with tests, after the emulator starts up
+                type: boolean
+            executor:
+                description: Executor for the job
+                type: executor
+            gpu:
+                default: swiftshader_indirect
+                description: |
+                    The value to use for the "-gpu" flag.
+                    If set to "", the emulator will be run without the -gpu flag.
+                type: string
+            install_system_image:
+                default: true
+                description: |
+                    Whether to first install the system image via sdkmanager
+                type: boolean
+            kill_emulators:
+                default: true
+                description: |
+                    Whether to kill the emulators after the tests complete
+                type: boolean
+            max_tries:
+                default: 2
+                description: Max number of tries. To disable retries, set this to 1.
+                type: integer
+            memory:
+                default: -1
+                description: |
+                    The value to use for the "-memory" flag.
+                    If set to -1, the emulator will be run without the -memory flag.
+                type: integer
+            no_audio:
+                default: true
+                description: |
+                    Whether to run the emulator with the -noaudio flag
+                type: boolean
+            no_boot_anim:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-boot-anim flag
+                type: boolean
+            no_output_timeout:
+                default: 10m
+                description: |
+                    Use this to configure the no_output_timeout value of the test run
+                type: string
+            no_snapshot:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-snapshot flag
+                type: boolean
+            no_window:
+                default: true
+                description: |
+                    Whether to run the emulator with the -no-window flag
+                type: boolean
+            override_emulator_args:
+                default: ""
+                description: |
+                    If this is set to a non-blank value, the emulator command will be
+                    run with the -avd flag and the value of "override_args" (i.e. none of the defaults
+                    provided by the orb command will be used)
+                type: string
+            post_emulator_launch_assemble_command:
+                default: ./gradlew assembleDebugAndroidTest
+                description: |
+                    If this is set to a non-blank value, the configured command will be run
+                    after the emulator has been launched, and before commencing the
+                    wait for the emulator to finish starting up.
+                type: string
+            post_emulator_wait_steps:
+                default: []
+                description: |
+                    Steps to execute after waiting for the emulator to start up
+                type: steps
+            post_run_tests_steps:
+                default: []
+                description: |
+                    Steps to run after the tests
+                type: steps
+            pre_emulator_wait_steps:
+                default: []
+                description: |
+                    Steps to execute while before beginning to wait for the emulator to start up
+                type: steps
+            pre_run_tests_steps:
+                default: []
+                description: |
+                    Steps to run before the tests
+                type: steps
+            pre_test_command:
+                default: ' '
+                description: Command to run prior to runnning the test command
+                type: string
+            pull_data:
+                default: false
+                description: |
+                    Whether to pull data after running tests
+                type: boolean
+            pull_data_path:
+                default: data
+                description: |
+                    Emulator directory to pull data from
+                type: string
+            pull_data_target:
+                default: .
+                description: |
+                    Location to save pulled data
+                type: string
+            restore_gradle_cache_find_args:
+                default: . -name "build.gradle*" -o -name "settings.gradle*"
+                description: |
+                    Use this to customize how the find command is used to look for relevant
+                    file changes.
+                type: string
+            restore_gradle_cache_post_emulator_launch:
+                default: true
+                description: |
+                    Whether to restore the gradle cache after the emulator has been launched,
+                    and before commencing the wait for the emulator to finish starting up.
+                type: boolean
+            restore_gradle_cache_prefix:
+                default: v1
+                description: |
+                    Cache prefix used if the "restore_gradle_cache_post_emulator_launch" parameter
+                    is set to true.
+                type: string
+            retry_interval:
+                default: 5
+                description: Duration in seconds to wait before the next try
+                type: integer
+            run_logcat:
+                default: false
+                description: |
+                    Whether to run with logcat in the background, after the emulator starts up
+                type: boolean
+            run_tests_working_directory:
+                default: .
+                description: Working directory to run the tests in
+                type: string
+            save_gradle_cache:
+                default: true
+                description: |
+                    Whether to write to the gradle cache after the tests have run
+                type: boolean
+            system_image:
+                default: system-images;android-29;default;x86
+                description: |
+                    Name of system image e.g. "system-images;android-29;default;x86".
+                    It should match the name seen in the "sdkmanager --list" output.
+                type: string
+            test_command:
+                default: ./gradlew connectedDebugAndroidTest
+                description: Command to run in order to run the tests
+                type: string
+            verbose:
+                default: true
+                description: |
+                    Whether to run the emulator with the -verbose flag
+                type: boolean
+            wait_for_emulator:
+                default: true
+                description: |
+                    Whether to wait for the emulator to start up
+                type: boolean
+        steps:
+            - when:
+                condition: << parameters.checkout >>
+                steps:
+                    - checkout
+            - start_emulator_and_run_tests:
+                additional_avd_args: << parameters.additional_avd_args >>
+                additional_emulator_args: << parameters.additional_emulator_args >>
+                avd_name: << parameters.avd_name >>
+                camera_back: << parameters.camera_back >>
+                camera_front: << parameters.camera_front >>
+                delay_adb: << parameters.delay_adb >>
+                disable_animations: << parameters.disable_animations >>
+                gpu: << parameters.gpu >>
+                install_system_image: << parameters.install_system_image >>
+                kill_emulators: << parameters.kill_emulators >>
+                max_tries: << parameters.max_tries >>
+                memory: << parameters.memory >>
+                no_audio: << parameters.no_audio >>
+                no_boot_anim: << parameters.no_boot_anim >>
+                no_output_timeout: << parameters.no_output_timeout >>
+                no_snapshot: << parameters.no_snapshot >>
+                no_window: << parameters.no_window >>
+                override_emulator_args: << parameters.override_emulator_args >>
+                post_emulator_launch_assemble_command: << parameters.post_emulator_launch_assemble_command >>
+                post_emulator_wait_steps: << parameters.post_emulator_wait_steps >>
+                post_run_tests_steps: << parameters.post_run_tests_steps >>
+                pre_emulator_wait_steps: << parameters.pre_emulator_wait_steps >>
+                pre_run_tests_steps: << parameters.pre_run_tests_steps >>
+                pre_test_command: << parameters.pre_test_command >>
+                pull_data: << parameters.pull_data >>
+                pull_data_path: << parameters.pull_data_path >>
+                pull_data_target: << parameters.pull_data_target >>
+                restore_gradle_cache_find_args: << parameters.restore_gradle_cache_find_args >>
+                restore_gradle_cache_post_emulator_launch: << parameters.restore_gradle_cache_post_emulator_launch >>
+                restore_gradle_cache_prefix: << parameters.restore_gradle_cache_prefix >>
+                retry_interval: << parameters.retry_interval >>
+                run_logcat: << parameters.run_logcat >>
+                run_tests_working_directory: << parameters.run_tests_working_directory >>
+                save_gradle_cache: << parameters.save_gradle_cache >>
+                system_image: <<parameters.system_image>>
+                test_command: << parameters.test_command >>
+                verbose: << parameters.verbose >>
+                wait_for_emulator: << parameters.wait_for_emulator >>
+examples:
+    granular_commands:
+        description: |
+            An example of using the more granular commands of the orb together,
+            to achieve something similar to using the "start_emulator_and_run_tests" command
+            or the "run_ui_tests" job.
+        usage:
+            version: "2.1"
+            orbs:
+                android: circleci/android@3.0.0
+            jobs:
+                test:
+                    executor:
+                        name: android/android_machine
+                        resource_class: large
+                        tag: default
+                    steps:
+                        - checkout
+                        - android/create_avd:
+                            avd_name: myavd
+                            install: true
+                            system_image: system-images;android-31;default;x86_64
+                        - android/start_emulator:
+                            avd_name: myavd
+                            no_window: true
+                            restore_gradle_cache_prefix: v1a
+                        - android/run_tests
+                        - android/save_gradle_cache:
+                            cache_prefix: v1a
+            workflows:
+                test:
+                    jobs:
+                        - test
+    override_machine_resource_class:
+        description: |
+            An example of overriding the android_machine executor's default resource class
+        usage:
+            version: "2.1"
+            orbs:
+                android: circleci/android@3.0.0
+            workflows:
+                test:
+                    jobs:
+                        - android/run_ui_tests:
+                            executor:
+                                name: android/android_machine
+                                resource_class: xlarge
+                                tag: default
+    run_ui_tests_job:
+        description: |
+            A simple example of using the run_ui_tests job,
+            using most of the default parameters.
+            Parameters like the system_image and emulator options (e.g. "no_window")
+            may need to be adjusted from the defaults, according to your project.
+        usage:
+            version: "2.1"
+            orbs:
+                android: circleci/android@3.0.0
+            workflows:
+                test:
+                    jobs:
+                        - android/run_ui_tests:
+                            executor:
+                                name: android/android_machine
+                                resource-class: large.gen2
+                                tag: 2024.01.1
+                            system_image: system-images;android-31;default;x86_64
+    start_emulator_and_run_tests:
+        description: |
+            A simple example of using the start_emulator_and_run_tests command
+            in a job, using most of the default parameters.
+            Parameters like the system_image and emulator options (e.g. "no_window")
+            may need to be adjusted from the defaults, according to your project.
+        usage:
+            version: "2.1"
+            orbs:
+                android: circleci/android@3.0.0
+            jobs:
+                test:
+                    executor:
+                        name: android/android_machine
+                        resource_class: large
+                        tag: default
+                    steps:
+                        - checkout
+                        - android/start_emulator_and_run_tests:
+                            system_image: system-images;android-31;default;x86_64
+            workflows:
+                test:
+                    jobs:
+                        - test
+    test_matrix:
+        description: |
+            A simple example of using a test matrix to test on different
+            emulators.
+        usage:
+            version: "2.1"
+            orbs:
+                android: circleci/android@3.0.0
+            workflows:
+                test:
+                    jobs:
+                        - android/run_ui_tests:
+                            matrix:
+                                parameters:
+                                    system_image:
+                                        - system-images;android-31;default;x86_64
+                                        - system-images;android-31;default;x86_64
+                            name: ui-tests-<<matrix.system_image>>
+
