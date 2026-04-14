@@ -15,7 +15,7 @@ parameters:
       crashes when running emulator tests.
     type: enum
     default: large
-    enum: [medium, large, xlarge, 2xlarge]
+    enum: [medium, large, xlarge, 2xlarge, medium.gen2, large.gen2, xlarge.gen2, 2xlarge.gen2, 2xlarge+.gen2]
 
 machine:
   image: android:<< parameters.tag >>
